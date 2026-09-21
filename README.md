@@ -64,10 +64,10 @@ Static Ethernet (edit in `wiznet-pico/main.py`):
 
 | Setting | Example in tree |
 |---------|-----------------|
-| IP | `192.168.10.181` |
-| Subnet | `255.255.255.0` |
-| Gateway / DNS | `192.168.10.1` |
-| WebSocket | `ws://192.168.10.225:1880/ws` |
+| IP | `xxx.xxx.xxx.xxx` |
+| Subnet | `xxx.xxx.xxx.xxx` |
+| Gateway / DNS | `xxx.xxx.xxx.xxx` |
+| WebSocket | `ws://xxx.xxx.xxx.xxx:1880/ws` |
 
 ## UART framing
 
