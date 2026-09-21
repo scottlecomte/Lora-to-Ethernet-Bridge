@@ -2,17 +2,17 @@
 import time, socket, ubinascii, ujson as json, machine, gc
 
 # SET ETHERNET ADDRESS VARIABLES HERE
-IP_ADDRESS = '192.168.10.181'
-SUBNET_MASK = '255.255.255.0'
-GATEWAY = '192.168.10.1'
-DNS = '192.168.10.1'
+IP_ADDRESS = 'xxx.xxx.xxx.xxx'
+SUBNET_MASK = 'xxx.xxx.xxx.xxx'
+GATEWAY = 'xxx.xxx.xxx.xxx'
+DNS = 'xxx.xxx.xxx.xxx'
 
 # LED SETUP
 LED_PIN_WS = 25
 led_ws = machine.Pin(LED_PIN_WS, machine.Pin.OUT)
 
 # SET WEB SOCKET CONNECTION VARIABLES HERE
-WEB_SOCKET_ADDRESS = '192.168.10.225'
+WEB_SOCKET_ADDRESS = 'xxx.xxx.xxx.xxx'
 WEB_SOCKET_PORT = '1880'
 WEB_SOCKET_PATH = '/ws'
 
