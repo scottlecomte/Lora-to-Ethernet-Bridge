@@ -107,6 +107,10 @@ Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `
 
 Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). Parse the text as JSON; sensor fields are under `payload`.
 
+## PCBs
+
+Boards for this project (and others) are courtesy of [PCBWay](https://www.pcbway.com/), who sponsor my projects and provide the PCBs free of charge. I’ve been impressed by how quickly boards are made and delivered, and by the support from their engineering team.
+
 ## License / origin
 
 Personal home-automation firmware. Adapt pin maps and IPs for your site before deploying.
