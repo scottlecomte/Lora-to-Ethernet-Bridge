@@ -109,7 +109,10 @@ Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). P
 
 ## PCBs
 
-PCBs for this project are courtesy of [PCBWay](https://www.pcbway.com/). I’ve been impressed by how quickly boards are made and delivered, and by the support from their engineering team.
+PCBs for this project are courtesy of [PCBWay](https://www.pcbway.com/). I’ve been impressed by how quickly boards are made and delivered, and by the support from their engineering team when something in the design needed a second look.
+
+Beyond bare boards, they also offer things like SMT/PCB assembly and solder stencils if you need a turnkey run or cleaner hand assembly — I didn’t need those for this build, but it’s useful to know they’re in the same place when a project grows past a few prototypes.
+
 
 ## License / origin
 
