@@ -109,7 +109,7 @@ Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). P
 
 ## PCBs
 
-Boards for this project (and others) are courtesy of [PCBWay](https://www.pcbway.com/), who sponsor my projects and provide the PCBs free of charge. I’ve been impressed by how quickly boards are made and delivered, and by the support from their engineering team.
+PCBs for this project are courtesy of [PCBWay](https://www.pcbway.com/). I’ve been impressed by how quickly boards are made and delivered, and by the support from their engineering team.
 
 ## License / origin
 
