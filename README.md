@@ -99,10 +99,11 @@ Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `
 
 ## RadioHead ACKs
 
-- **Confirmed TX**: RadioHead clients that wait for an ACK get a short RadioHead ACK (`b'!'` with `FLAGS_ACK`) from the LoRa Pico when `header_to == SERVER_ADDRESS` (this node). Packets addressed elsewhere are still received (`receive_all=True`) but do not trigger an ACK.
-- **Deferred ACK**: ACK TX is queued in the RX IRQ (`_pending_acks`) and drained from the main loop via `process_pending_acks()`. Never call `send` / `wait_packet_sent` from IRQ context.
-- **DIO / TX_DONE**: `wait_packet_sent` prefers the IRQ-updated mode flag but also polls the chip for `TX_DONE`, because DIO0 can miss the edge. Missing that delays return to RX and burns the client ACK window.
-- **CDC / Thonny**: Do not leave Thonny stopped on the Pico’s USB CDC — a stopped REPL holds the MCU so the main loop (and thus ACK drain) does not run. Disconnect or let the script run standalone after flash.
+- **`acks=True`**: clients that use RadioHead-style `send_to_wait` get a short ACK (`b'!'`, `FLAGS_ACK`) when `header_to == SERVER_ADDRESS`. Packets for other destinations are still received (`receive_all=True`) and do not get an ACK.
+- **Forward anyway**: the bridge does not wait on that ACK. Every received frame is still framed onto UART and published over Ethernet whether or not the RF ACK goes out.
+- **Deferred ACK**: the RX IRQ only queues `(header_from, header_id)` on `_pending_acks`. `process_pending_acks()` runs from the main loop — never `send` / `wait_packet_sent` inside the RX IRQ.
+- **TX_DONE / RX_DONE**: DIO0 is unreliable. `wait_packet_sent()` polls `TX_DONE` and the op-mode register so a missed TxDone edge does not burn the ACK window. RX completion is the `RX_DONE` flag in the DIO handler; those IRQ flags are cleared immediately so DIO0 can re-arm.
+- **CDC / Thonny**: do not leave Thonny stopped on the Pico’s USB CDC. A stopped REPL holds the MCU, so the main loop does not run — no UART forward, and no ACKs. Disconnect or let the script run after flash.
 
 ## Reliability notes (2026-09)
 
