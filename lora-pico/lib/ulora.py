@@ -99,6 +99,10 @@ class LoRa(object):
         self._modem_config = modem_config
         self._receive_all = receive_all
         self._acks = acks
+        # RF ACKs queued here; drained from main via process_pending_acks()
+        # (never call send/wait_packet_sent from RX IRQ)
+        self._pending_acks = []
+        self._pending_acks_max = 8
 
         self._this_address = this_address
         self._last_header_id = 0
@@ -108,7 +112,7 @@ class LoRa(object):
 
         self.cad_timeout = 0
         self.send_retries = 2
-        self.wait_packet_sent_timeout = 0.2
+        self.wait_packet_sent_timeout = 1.0
         self.retry_timeout = 0.2
         
         # Setup the module
@@ -166,7 +170,8 @@ class LoRa(object):
         if self._tx_power > 23:
             self._tx_power = 23
 
-        if self._tx_power < 20:
+        # RadioHead/Adafruit polarity: PA_DAC_ENABLE only for >= 20 dBm
+        if self._tx_power >= 20:
             self._spi_write(REG_4D_PA_DAC, PA_DAC_ENABLE)
             self._tx_power -= 3
         else:
@@ -185,8 +190,11 @@ class LoRa(object):
 
     def set_mode_tx(self):
         if self._mode != MODE_TX:
-            self._spi_write(REG_01_OP_MODE, MODE_TX)
+            # Map DIO0 to TxDone and clear flags while still in standby —
+            # entering TX before the map can miss a fast TxDone edge.
             self._spi_write(REG_40_DIO_MAPPING1, 0x40)  # Interrupt on TxDone
+            self._spi_write(REG_12_IRQ_FLAGS, 0xff)
+            self._spi_write(REG_01_OP_MODE, MODE_TX)
             self._mode = MODE_TX
 
     def set_mode_rx(self):
@@ -225,12 +233,28 @@ class LoRa(object):
                 return status
 
     def wait_packet_sent(self):
-        # wait for `_handle_interrupt` to switch the mode back
-        start = time.time()
-        while time.time() - start < self.wait_packet_sent_timeout:
+        # Prefer IRQ-updated _mode; also poll the chip — DIO0/TxDone IRQ can
+        # miss; a full timeout delays set_mode_rx and burns the ACK window.
+        timeout_ms = int(self.wait_packet_sent_timeout * 1000)
+        if timeout_ms < 1:
+            timeout_ms = 1
+        start = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
             if self._mode != MODE_TX:
                 return True
-
+            try:
+                irq_flags = self._spi_read(REG_12_IRQ_FLAGS)
+                if irq_flags & TX_DONE:
+                    self.set_mode_idle()
+                    self._spi_write(REG_12_IRQ_FLAGS, 0xff)
+                    return True
+                op = self._spi_read(REG_01_OP_MODE) & 0x07
+                if op != MODE_TX:
+                    self._mode = MODE_STDBY
+                    self._spi_write(REG_12_IRQ_FLAGS, 0xff)
+                    return True
+            except Exception:
+                pass
         return False
 
     def set_mode_idle(self):
@@ -284,8 +308,29 @@ class LoRa(object):
         return False
 
     def send_ack(self, header_to, header_id):
+        header_to = int(header_to) & 0xff
+        header_id = int(header_id) & 0xff
         self.send(b'!', header_to, header_id, FLAGS_ACK)
-        self.wait_packet_sent()
+        return self.wait_packet_sent()
+
+    def process_pending_acks(self):
+        """Send RF ACKs queued from RX IRQ. Call from main loop only."""
+        while self._pending_acks:
+            try:
+                header_to, header_id = self._pending_acks.pop(0)
+            except Exception:
+                break
+            try:
+                print("ACK Q→TX to=%d id=%d" % (header_to, header_id))
+                ok = self.send_ack(header_to, header_id)
+                print("ACK TX done ok=%s" % (ok,))
+                self.set_mode_rx()
+            except Exception as e:
+                print("ACK TX err", e)
+                try:
+                    self.set_mode_rx()
+                except Exception:
+                    pass
 
     def _spi_write(self, register, payload):
         if type(payload) == int:
@@ -357,7 +402,13 @@ class LoRa(object):
                     message = self._decrypt(message)
 
                 if self._acks and header_to == self._this_address and not header_flags & FLAGS_ACK:
-                    self.send_ack(header_from, header_id)
+                    # Defer TX ACK to main loop — send_ack() busy-waits on TX_DONE IRQ
+                    try:
+                        if len(self._pending_acks) >= self._pending_acks_max:
+                            self._pending_acks.pop(0)
+                        self._pending_acks.append((header_from, header_id))
+                    except Exception:
+                        pass
 
                 self.set_mode_rx()
 

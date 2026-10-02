@@ -14,7 +14,7 @@ RFM95 → Raspberry Pi Pico (LoRa RX) → UART @ 230400 → W5500-EVB-Pico → E
 |------|--------|
 | MCU | Raspberry Pi Pico (RP2040), MicroPython |
 | Radio | HopeRF / Adafruit-style **RFM95** (915 MHz in this tree) |
-| Role | LoRa receive → framed UART TX (fire-and-forget) |
+| Role | LoRa receive → framed UART TX; RadioHead ACKs for packets addressed to this server |
 
 **RFM95 wiring (this firmware)**
 
@@ -41,7 +41,7 @@ Baud: **230400**, UART0 both sides.
 
 Optional LEDs (LoRa board): GP12 = LoRa RX activity, GP13 = UART TX activity.
 
-Radio address: this node is RadioHead **server address 2** (`SERVER_ADDRESS = 2`), `receive_all=True`, ACKs off.
+Radio address: this node is RadioHead **server address 2** (`SERVER_ADDRESS = 2`). `receive_all=True` so other destinations are heard, but only packets with `header_to == SERVER_ADDRESS` get RadioHead ACKs (`acks=True`).
 
 ### Board B — Wiznet Pico
 
@@ -89,23 +89,30 @@ Wiznet wraps each decoded message as `{"payload": <obj>, "rcv_ts": <epoch>}` on 
 
 ```
 lora-pico/
-  main.py          # LoRa RX → framed UART
-  lib/ulora.py     # RFM95 / RadioHead-compatible driver
+  main.py          # LoRa RX → framed UART; drains deferred RadioHead ACKs in main loop
+  lib/ulora.py     # RFM95 / RadioHead-compatible driver (deferred ACK queue + TX_DONE poll)
 wiznet-pico/
   main.py          # UART → W5500 WebSocket + reconnect / WDT
 ```
 
 Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `mpremote` as MicroPython.
 
+## RadioHead ACKs
+
+- **Confirmed TX**: RadioHead clients that wait for an ACK get a short RadioHead ACK (`b'!'` with `FLAGS_ACK`) from the LoRa Pico when `header_to == SERVER_ADDRESS` (this node). Packets addressed elsewhere are still received (`receive_all=True`) but do not trigger an ACK.
+- **Deferred ACK**: ACK TX is queued in the RX IRQ (`_pending_acks`) and drained from the main loop via `process_pending_acks()`. Never call `send` / `wait_packet_sent` from IRQ context.
+- **DIO / TX_DONE**: `wait_packet_sent` prefers the IRQ-updated mode flag but also polls the chip for `TX_DONE`, because DIO0 can miss the edge. Missing that delays return to RX and burns the client ACK window.
+- **CDC / Thonny**: Do not leave Thonny stopped on the Pico’s USB CDC — a stopped REPL holds the MCU so the main loop (and thus ACK drain) does not run. Disconnect or let the script run standalone after flash.
+
 ## Reliability notes (2026-09)
 
-- LoRa IRQ path stays non-blocking (`micropython.schedule`); LED pulse runs in the main loop; RX queue capped at 32.
+- LoRa IRQ path stays non-blocking (`micropython.schedule`); LED pulse runs in the main loop; RX queue capped at 32; ACK drain runs in the main loop (see above).
 - Wiznet keeps finite socket timeouts, polls for WebSocket close, sends a WS ping on the 30 s heartbeat, and reconnects when Node-RED drops the socket on flow deploy.
 - Wiznet WDT timeout 15 s (`USE_WDT = True`).
 
 ## Node-RED
 
-Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). Parse the text as JSON; sensor fields are under `payload`.
+Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). Parse the text as JSON; client payload fields are under `payload`.
 
 
 ## License / origin

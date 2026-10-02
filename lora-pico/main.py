@@ -61,16 +61,21 @@ def _frame_and_send(payload_bytes):
 
 def run():
     lora = LoRa(SPIConfig.rp2_0, RFM95_INT, SERVER_ADDRESS, RFM95_CS,
-                reset_pin=RFM95_RST, freq=RF95_FREQ, tx_power=RF95_POW, receive_all=True, acks=False)
+                reset_pin=RFM95_RST, freq=RF95_FREQ, tx_power=RF95_POW, receive_all=True, acks=True)
     lora.on_recv = on_recv_callback
     try:
         lora.set_mode_rx()
     except Exception:
         pass
 
-    print("FF forwarder running UART {} @ {}".format(UART_ID, UART_BAUD))
+    print("FF forwarder running UART {} @ {} acks={}".format(UART_ID, UART_BAUD, getattr(lora, "_acks", None)))
     try:
         while True:
+            # Drain RF ACKs outside IRQ (ulora queues them on RX) — before UART work
+            try:
+                lora.process_pending_acks()
+            except Exception as e:
+                print("ACK drain err", e)
             global _led_lora_pending
             if _led_lora_pending:
                 _led_lora_pending = False
@@ -98,8 +103,13 @@ def run():
                     msg = {"error":"serialize_failed","raw":str(getattr(payload,"message",b""))}
                 payload_bytes = json.dumps(msg).encode('utf-8')
                 _frame_and_send(payload_bytes)
+                # Drain again after UART so ACK isn't stuck behind framing
+                try:
+                    lora.process_pending_acks()
+                except Exception as e:
+                    print("ACK drain err", e)
             else:
-                time.sleep(0.02)
+                time.sleep(0.01)
     finally:
         try:
             lora.close()
