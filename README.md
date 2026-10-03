@@ -2,6 +2,8 @@
 
 Dual-board MicroPython bridge that receives RadioHead-style LoRa packets on an RFM95, forwards them over UART, and publishes them to a Node-RED WebSocket over Ethernet.
 
+A client that sends temperature readings is [Local LoRa Temperature Probe Sensor](https://github.com/scottlecomte/Local-LoRa-Temperature-Probe-Sensor).
+
 ```
 RFM95 → Raspberry Pi Pico (LoRa RX) → UART @ 230400 → W5500-EVB-Pico → Ethernet → Node-RED ws://…/ws
 ```
