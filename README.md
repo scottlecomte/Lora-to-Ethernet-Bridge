@@ -106,7 +106,6 @@ Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `
 - **Forward anyway**: the bridge does not wait on that ACK. Every received frame is still framed onto UART and published over Ethernet whether or not the RF ACK goes out.
 - **Deferred ACK**: the RX IRQ only queues `(header_from, header_id)` on `_pending_acks`. `process_pending_acks()` runs from the main loop — never `send` / `wait_packet_sent` inside the RX IRQ.
 - **TX_DONE / RX_DONE**: DIO0 is unreliable. `wait_packet_sent()` polls `TX_DONE` and the op-mode register so a missed TxDone edge does not burn the ACK window. RX completion is the `RX_DONE` flag in the DIO handler; those IRQ flags are cleared immediately so DIO0 can re-arm.
-- **CDC / Thonny**: do not leave Thonny stopped on the Pico’s USB CDC. A stopped REPL holds the MCU, so the main loop does not run — no UART forward, and no ACKs. Disconnect or let the script run after flash.
 
 ## Reliability notes (2026-09)
 
