@@ -20,6 +20,35 @@ _payload_queue = []
 _QUEUE_MAX = 32
 _led_lora_pending = False
 
+# UART dedupe. Key is RadioHead header_from + header_id. Short memory so an
+# 8-bit id can be reused; long enough that a repeater echo is a duplicate.
+# Does not suppress ACKs. Those stay queued in ulora and still TX for each RX.
+_seen_keys = []
+_SEEN_MAX = 32
+_SEEN_MS = 30000
+
+def _drop_uart_dup(payload):
+    try:
+        src = int(payload.header_from) & 0xff
+        pid = int(payload.header_id) & 0xff
+    except Exception:
+        return False
+    now = time.ticks_ms()
+    fresh = []
+    dup = False
+    for item in _seen_keys:
+        if time.ticks_diff(now, item[2]) > _SEEN_MS:
+            continue
+        fresh.append(item)
+        if item[0] == src and item[1] == pid:
+            dup = True
+    if not dup:
+        fresh.append((src, pid, now))
+        if len(fresh) > _SEEN_MAX:
+            fresh = fresh[-_SEEN_MAX:]
+    _seen_keys[:] = fresh
+    return dup
+
 # uart single instance
 uart = machine.UART(UART_ID, UART_BAUD, tx=machine.Pin(UART_TX_PIN), rx=machine.Pin(UART_RX_PIN), timeout=10)
 
@@ -84,25 +113,29 @@ def run():
                 led_lora.off()
             if _payload_queue:
                 payload = _payload_queue.pop(0)
-                try:
+                if _drop_uart_dup(payload):
+                    # Later copy, same header_from + header_id. First copy already went out.
+                    print("FF: drop dup from", int(payload.header_from), "id", int(payload.header_id))
+                else:
                     try:
-                        message_str = payload.message.decode('utf-8')
+                        try:
+                            message_str = payload.message.decode('utf-8')
+                        except Exception:
+                            message_str = ubinascii.b2a_base64(payload.message).decode().strip()
+                        msg = {
+                            "message": message_str,
+                            "header_to": int(payload.header_to),
+                            "header_from": int(payload.header_from),
+                            "header_id": int(payload.header_id),
+                            "header_flags": int(payload.header_flags),
+                            "rssi": float(payload.rssi),
+                            "snr": float(payload.snr),
+                            "ts": time.time()
+                        }
                     except Exception:
-                        message_str = ubinascii.b2a_base64(payload.message).decode().strip()
-                    msg = {
-                        "message": message_str,
-                        "header_to": int(payload.header_to),
-                        "header_from": int(payload.header_from),
-                        "header_id": int(payload.header_id),
-                        "header_flags": int(payload.header_flags),
-                        "rssi": float(payload.rssi),
-                        "snr": float(payload.snr),
-                        "ts": time.time()
-                    }
-                except Exception:
-                    msg = {"error":"serialize_failed","raw":str(getattr(payload,"message",b""))}
-                payload_bytes = json.dumps(msg).encode('utf-8')
-                _frame_and_send(payload_bytes)
+                        msg = {"error":"serialize_failed","raw":str(getattr(payload,"message",b""))}
+                    payload_bytes = json.dumps(msg).encode('utf-8')
+                    _frame_and_send(payload_bytes)
                 # Drain again after UART so ACK isn't stuck behind framing
                 try:
                     lora.process_pending_acks()
