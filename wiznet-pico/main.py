@@ -257,7 +257,7 @@ def link_is_up(nic):
         return False
 
 # ---------- UART & parsing ----------
-uart = machine.UART(UART_ID, UART_BAUD, tx=machine.Pin(UART_TX_PIN), rx=machine.Pin(UART_RX_PIN), timeout=10)
+uart = machine.UART(UART_ID, UART_BAUD, tx=machine.Pin(UART_TX_PIN), rx=machine.Pin(UART_RX_PIN), timeout=10, rxbuf=4096)
 uart_buf = b""
 
 def _extract_brace_json(buf):
