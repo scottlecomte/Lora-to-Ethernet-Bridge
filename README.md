@@ -113,6 +113,12 @@ Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `
 - Wiznet keeps finite socket timeouts, polls for WebSocket close, sends a WS ping on the 30 s heartbeat, and reconnects when Node-RED drops the socket on flow deploy.
 - Wiznet WDT timeout 15 s (`USE_WDT = True`).
 
+## Reliability notes (2026-10)
+
+- Wiznet UART parser no longer stalls on a damaged frame. Previously a payload that failed UTF-8 decoding raised (MicroPython ignores `errors='ignore'`), the read position never advanced, and every later frame waited until the 8 KB buffer cap trimmed it, then went out in one burst.
+- A bad payload now returns `None` and the parser resyncs; if the next `A5 5A` header appears inside a frame's declared length, that short frame is dropped immediately; the parse loop keeps draining after any skip.
+- Any other parse exception drops one byte and resyncs, counted as `pexc` in the Wiznet `HEARTBEAT` line.
+
 ## Node-RED
 
 Point a WebSocket **server** node at path `/ws` (or change `WEB_SOCKET_PATH`). Parse the text as JSON; client payload fields are under `payload`.

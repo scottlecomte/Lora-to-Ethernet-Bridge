@@ -281,10 +281,14 @@ def _extract_line(buf):
         return None, buf
 
 def _decode_payload(payload):
+    # Never raise. On MicroPython before v1.29 the errors='ignore' argument is
+    # ignored, so the old fallback raised UnicodeError again, the exception
+    # escaped the parser, uart_buf was never advanced and every later frame
+    # stalled behind the bad one until the 8 KB cap trimmed it.
     try:
         return payload.decode('utf-8')
     except Exception:
-        return payload.decode('utf-8', 'ignore')
+        return None
 
 def _extract_uart_message(buf):
     if not buf:
@@ -302,17 +306,27 @@ def _extract_uart_message(buf):
             frame_len = (buf[2] << 8) | buf[3]
             if frame_len == 0 or frame_len > MAX_FRAME_LEN:
                 return None, buf[1:], 1
+            # Payload is JSON text, so it never contains A5 5A. If the next
+            # sync lands inside this frame's declared length, bytes were lost:
+            # drop the short frame now and resync on the next one instead of
+            # waiting for (and then choking on) bytes that belong to it.
+            nxt = buf.find(FRAME_MAGIC, 2)
+            if nxt != -1 and nxt < 4 + frame_len:
+                return None, buf[nxt:], 1
             if len(buf) < 4 + frame_len:
                 return None, buf, 0
 
-            payload = buf[4:4+frame_len]
-            return _decode_payload(payload), buf[4+frame_len:], 0
+            text = _decode_payload(buf[4:4+frame_len])
+            if text is None:
+                return None, buf[2:], 1   # undecodable: skip this sync, resync
+            return text, buf[4+frame_len:], 0
 
     if not FRAME_MAGIC_ONLY and len(buf) >= 2:
         frame_len = (buf[0] << 8) | buf[1]
         if 0 < frame_len <= MAX_FRAME_LEN and len(buf) >= 2 + frame_len:
             payload = buf[2:2+frame_len]
-            return _decode_payload(payload), buf[2+frame_len:], 0
+            text = _decode_payload(payload)
+            return text, buf[2+frame_len:], (0 if text is not None else 1)
 
     if not FRAME_MAGIC_ONLY:
         text, new_buf = _extract_brace_json(buf)
@@ -365,6 +379,7 @@ def main():
     parse_errors = 0
     ws_reconnects = 0
     link_drops = 0
+    parse_exc = 0
 
     # initial connect attempt
     start = time.time()
@@ -426,10 +441,24 @@ def main():
 
                 # parsing loop (magic-framed, legacy-framed, then text fallback)
                 while True:
-                    text, new_buf, bad = _extract_uart_message(uart_buf)
+                    before = len(uart_buf)
+                    try:
+                        text, new_buf, bad = _extract_uart_message(uart_buf)
+                    except MemoryError:
+                        raise
+                    except Exception as e:
+                        # Never leave a poison byte at the head of the buffer.
+                        parse_exc += 1
+                        if parse_exc <= 5 or parse_exc % 100 == 0:
+                            print("UART parse exc", parse_exc, repr(e))
+                        text, new_buf, bad = None, uart_buf[1:], 1
                     bad_frames += bad
                     uart_buf = new_buf
                     if text is None:
+                        # Keep going after a resync/drop (buffer shrank) so frames
+                        # already buffered behind it go out now, not on next RX.
+                        if len(uart_buf) < before:
+                            continue
                         break
 
                     frames_parsed += 1
@@ -568,6 +597,7 @@ def main():
                       "sent_age:", sent_age,
                       "reconn:", ws_reconnects,
                       "link_drops:", link_drops,
+                      "pexc:", parse_exc,
                       "ws:", "up" if ws else "down")
             except Exception:
                 pass
