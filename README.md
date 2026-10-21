@@ -4,6 +4,9 @@ Dual-board MicroPython bridge that receives RadioHead-style LoRa packets on an R
 
 A client that sends temperature readings is [Local LoRa Temperature Probe Sensor](https://github.com/scottlecomte/Local-LoRa-Temperature-Probe-Sensor).
 A client that sends environment readings and rain tips is [Local LoRa Weather Station](https://github.com/scottlecomte/Local-LoRa-Weather-Station).
+A client that sends gate open/closed is [Local LoRa Gate Sensor](https://github.com/scottlecomte/Local-LoRa-Gate-Sensor).
+A client that sends water leak wet/dry is [Local LoRa Moisture Sensor](https://github.com/scottlecomte/Local-LoRa-Moisture-Sensor).
+How the nodes fit together is in [LoRaLAN](https://github.com/scottlecomte/LoRaLAN).
 
 ```
 RFM95 → Raspberry Pi Pico (LoRa RX) → UART @ 230400 → W5500-EVB-Pico → Ethernet → Node-RED ws://…/ws
