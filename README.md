@@ -95,8 +95,8 @@ Wiznet wraps each decoded message as `{"payload": <obj>, "rcv_ts": <epoch>}` on 
 
 ```
 lora-pico/
-  main.py          # LoRa RX → framed UART; drains deferred RadioHead ACKs in main loop
-  lib/ulora.py     # RFM95 / RadioHead-compatible driver (deferred ACK queue + TX_DONE poll)
+  main.py          # LoRa RX → framed UART; 60 s bridge_status; 30 s (from, id) dedupe
+  lib/ulora.py     # RFM95 / RadioHead driver (deferred ACKs, TX_DONE poll, PA_DAC, ACK counters)
 wiznet-pico/
   main.py          # UART → W5500 WebSocket + reconnect / WDT
 ```
@@ -106,9 +106,18 @@ Flash each `main.py` (and `ulora` under `lib/` on the LoRa Pico) with Thonny / `
 ## RadioHead ACKs
 
 - **`acks=True`**: clients that use RadioHead-style `send_to_wait` get a short ACK (`b'!'`, `FLAGS_ACK`) when `header_to == SERVER_ADDRESS`. Packets for other destinations are still received (`receive_all=True`) and do not get an ACK.
-- **Forward anyway**: the bridge does not wait on that ACK. Every received frame is still framed onto UART and published over Ethernet whether or not the RF ACK goes out.
+- **Forward anyway**: the bridge does not wait on that ACK. The first copy of a packet is still framed onto UART and published over Ethernet whether or not the RF ACK goes out. A later copy of the same `(header_from, header_id)` within 30 s is dropped and counted (see below).
 - **Deferred ACK**: the RX IRQ only queues `(header_from, header_id)` on `_pending_acks`. `process_pending_acks()` runs from the main loop — never `send` / `wait_packet_sent` inside the RX IRQ.
 - **TX_DONE / RX_DONE**: DIO0 is unreliable. `wait_packet_sent()` polls `TX_DONE` and the op-mode register so a missed TxDone edge does not burn the ACK window. RX completion is the `RX_DONE` flag in the DIO handler; those IRQ flags are cleared immediately so DIO0 can re-arm.
+- **ACK counters**: queue, success, timeout, error, drop, and latency are counted on the driver and are not printed. They go out on the periodic `bridge_status` frame.
+
+## LoRa Pico bridge (uartfix3)
+
+`lora-pico/` is the bridge firmware flashed 2026-10-20. The UART TX ring is 1024 bytes, and each framed write loops on the returned count until the whole frame is queued.
+
+- **TX power** is `RF95_POW = 17` (PA_BOOST, high-power DAC off, about +14 dBm). A request above 20 dBm uses the RadioHead PA_DAC path: the value is clamped, then `RegPaDac` is updated with a read-modify-write so the reserved bits stay put.
+- **Status**: after the boot banner, nothing is printed unless `VERBOSE` is set. Every 60 s the Pico sends a `bridge_status` JSON frame on the same UART (first frame about 5 s after boot). The object is nested under `bridge_status`, with no top-level `header_*`, `rssi`, or `snr`. The same JSON overwrites `/bridge_status.txt` every 30 min.
+- **Duplicates**: a later copy of the same `(header_from, header_id)` within 30 s is not framed onto UART. Drops increment `dup`, then `dup_src` (no hop flag) or `rpt_src` (`FLAGS_HOP_SET`). The first copy is still forwarded, and the RF ACK is unchanged.
 
 ## Reliability notes (2026-09)
 
