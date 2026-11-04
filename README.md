@@ -2,11 +2,11 @@
 
 Dual-board MicroPython bridge that receives RadioHead-style LoRa packets on an RFM95, forwards them over UART, and publishes them to a Node-RED WebSocket over Ethernet.
 
-A client that sends temperature readings is [Local LoRa Temperature Probe Sensor](https://github.com/scottlecomte/Local-LoRa-Temperature-Probe-Sensor).
-A client that sends environment readings and rain tips is [Local LoRa Weather Station](https://github.com/scottlecomte/Local-LoRa-Weather-Station).
-A client that sends gate open/closed is [Local LoRa Gate Sensor](https://github.com/scottlecomte/Local-LoRa-Gate-Sensor).
-A client that sends water leak wet/dry is [Local LoRa Moisture Sensor](https://github.com/scottlecomte/Local-LoRa-Moisture-Sensor).
-How the nodes fit together is in [LoRaLAN](https://github.com/scottlecomte/LoRaLAN).
+temperature probe sensor [Local LoRa Temperature Probe Sensor](https://github.com/scottlecomte/Local-LoRa-Temperature-Probe-Sensor).
+environment readings and rain tips sensor [Local LoRa Weather Station](https://github.com/scottlecomte/Local-LoRa-Weather-Station).
+gate open/closed sensor [Local LoRa Gate Sensor](https://github.com/scottlecomte/Local-LoRa-Gate-Sensor).
+Moisture sensor [Local LoRa Moisture Sensor](https://github.com/scottlecomte/Local-LoRa-Moisture-Sensor).
+LoRaLAN Overview [LoRaLAN](https://github.com/scottlecomte/LoRaLAN).
 
 ```
 RFM95 → Raspberry Pi Pico (LoRa RX) → UART @ 230400 → W5500-EVB-Pico → Ethernet → Node-RED ws://…/ws
@@ -47,7 +47,7 @@ Baud: **230400**, UART0 both sides.
 
 Optional LEDs (LoRa board): GP12 = LoRa RX activity, GP13 = UART TX activity.
 
-Radio address: this node is RadioHead **server address 2** (`SERVER_ADDRESS = 2`). `receive_all=True` so other destinations are heard, but only packets with `header_to == SERVER_ADDRESS` get RadioHead ACKs (`acks=True`).
+Radio address: this node is RadioHead **server address** (`SERVER_ADDRESS = X`). `receive_all=True` so other destinations are heard, but only packets with `header_to == SERVER_ADDRESS` get RadioHead ACKs (`acks=True`).
 
 ### Board B — Wiznet Pico
 
