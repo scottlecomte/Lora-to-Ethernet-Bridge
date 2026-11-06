@@ -103,6 +103,20 @@ class LoRa(object):
         # (never call send/wait_packet_sent from RX IRQ)
         self._pending_acks = []
         self._pending_acks_max = 8
+        # ACK counters (fix 2026-10-20): no print() in the ACK path. A wedged
+        # USB CDC makes each print stall up to the CDC TX timeout and delays
+        # the ACK past the node's wait window. Read these from the main loop.
+        self.ack_q = 0        # ACKs queued by the RX IRQ
+        self.ack_ok = 0       # ACK TX finished (TX_DONE / op-mode left TX)
+        self.ack_to = 0       # ACK TX did not finish within wait_packet_sent_timeout
+        self.ack_err = 0      # exception while sending an ACK
+        self.ack_drop = 0     # ACK queue overflow (oldest dropped)
+        self.ack_late = 0     # ACK finished > ack_late_ms after the RX IRQ
+        self.ack_late_ms = 800
+        self.ack_lat_max = 0  # max RX-IRQ -> TX-done ms
+        self.ack_lat_last = -1
+        self.tx_to = 0        # any wait_packet_sent() timeout
+        self.pa_regs = None   # (RegPaDac, RegPaConfig) read back after init
 
         self._this_address = this_address
         self._last_header_id = 0
@@ -170,14 +184,28 @@ class LoRa(object):
         if self._tx_power > 23:
             self._tx_power = 23
 
-        # RadioHead/Adafruit polarity: PA_DAC_ENABLE only for >= 20 dBm
-        if self._tx_power >= 20:
-            self._spi_write(REG_4D_PA_DAC, PA_DAC_ENABLE)
+        # fix 2026-10-20: RadioHead / Adafruit polarity. The +20 dBm high-power
+        # DAC (RegPaDac=0x87) is only for requests > 20 (21..23 -> 18..20 dBm
+        # out, 1% duty max). The old '< 20' test enabled the DAC for every
+        # request below 20, and for 21..23 overflowed OutputPower into
+        # MaxPower. Reserved bits 7:3 of RegPaDac are kept (read-modify-write).
+        pa_dac = self._spi_read(REG_4D_PA_DAC) & 0xf8
+        if self._tx_power > 20:
+            self._spi_write(REG_4D_PA_DAC, pa_dac | PA_DAC_ENABLE)
             self._tx_power -= 3
         else:
-            self._spi_write(REG_4D_PA_DAC, PA_DAC_DISABLE)
+            self._spi_write(REG_4D_PA_DAC, pa_dac | PA_DAC_DISABLE)
 
-        self._spi_write(REG_09_PA_CONFIG, PA_SELECT | (self._tx_power - 5))
+        out = self._tx_power - 5
+        if out < 0:
+            out = 0
+        if out > 15:
+            out = 15
+        self._spi_write(REG_09_PA_CONFIG, PA_SELECT | out)
+        try:
+            self.pa_regs = (self._spi_read(REG_4D_PA_DAC), self._spi_read(REG_09_PA_CONFIG))
+        except Exception:
+            self.pa_regs = None
         
     def on_recv(self, message):
         # This should be overridden by the user
@@ -233,11 +261,14 @@ class LoRa(object):
                 return status
 
     def wait_packet_sent(self):
-        # Prefer IRQ-updated _mode; also poll the chip — DIO0/TxDone IRQ can
-        # miss; a full timeout delays set_mode_rx and burns the ACK window.
+        # wait for `_handle_interrupt` to switch the mode back
+        # Use ticks_ms — time.time() is whole seconds on many Pico builds,
+        # so a 0.2s timeout was either ~0s or ~1s and raced the sensor window.
         timeout_ms = int(self.wait_packet_sent_timeout * 1000)
         if timeout_ms < 1:
             timeout_ms = 1
+        # fix 2026-10-20: also poll the chip (repo f009b7c). DIO0/TxDone IRQ can
+        # be missed; without the poll a missed edge burns the full timeout.
         start = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
             if self._mode != MODE_TX:
@@ -255,6 +286,7 @@ class LoRa(object):
                     return True
             except Exception:
                 pass
+        self.tx_to += 1
         return False
 
     def set_mode_idle(self):
@@ -315,18 +347,31 @@ class LoRa(object):
 
     def process_pending_acks(self):
         """Send RF ACKs queued from RX IRQ. Call from main loop only."""
+        # fix 2026-10-20: counters only, no print() (see __init__).
         while self._pending_acks:
             try:
-                header_to, header_id = self._pending_acks.pop(0)
+                item = self._pending_acks.pop(0)
+                header_to = item[0]
+                header_id = item[1]
+                t_rx = item[2] if len(item) > 2 else None
             except Exception:
                 break
             try:
-                print("ACK Q→TX to=%d id=%d" % (header_to, header_id))
                 ok = self.send_ack(header_to, header_id)
-                print("ACK TX done ok=%s" % (ok,))
+                if ok:
+                    self.ack_ok += 1
+                else:
+                    self.ack_to += 1
+                if t_rx is not None:
+                    lat = time.ticks_diff(time.ticks_ms(), t_rx)
+                    self.ack_lat_last = lat
+                    if lat > self.ack_lat_max:
+                        self.ack_lat_max = lat
+                    if lat > self.ack_late_ms:
+                        self.ack_late += 1
                 self.set_mode_rx()
-            except Exception as e:
-                print("ACK TX err", e)
+            except Exception:
+                self.ack_err += 1
                 try:
                     self.set_mode_rx()
                 except Exception:
@@ -406,7 +451,9 @@ class LoRa(object):
                     try:
                         if len(self._pending_acks) >= self._pending_acks_max:
                             self._pending_acks.pop(0)
-                        self._pending_acks.append((header_from, header_id))
+                            self.ack_drop += 1
+                        self._pending_acks.append((header_from, header_id, time.ticks_ms()))
+                        self.ack_q += 1
                     except Exception:
                         pass
 
